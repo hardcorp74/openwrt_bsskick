@@ -1,32 +1,29 @@
 #!/bin/ash
-figure="^[0-9]+$"
-# Script help
 if [ "$1" == "-h" ] || [ "$1" == "--h" ] || [ "$1" == "-help" ] || [ "$1" == "--help" ] || [ "$1" == "/?" ]
     then
-        echo "Usage: $0 [time_parsing] or simple press Enter default time 30 sec"
+        echo "Usage: $0 [mac list] or simple press Enter"
         exit 0
 fi
-time_id=$1
-if [ "$1" == "" ] || [[ ! $1 =~ $figure ]]
-    then
-    time_id=30
-fi
+mac_id=$(echo "$1" | awk '{print tolower($0)}')
 while true
 do
-    time_current=$(date +"%T")
-    time_early=$(date -d "@$(($(date +%s) - $time_id))" +"%T")
-    time_current_id="${time_current%?}."
-    time_early_id="${time_early%?}."
-    raw_id="$(logread -e hostapd | grep bss_termination_delay | awk '/'$time_early_id'/,/'$time_current_id'/')"
-    wifi_id_raw=$(printf '%s%s%s%s%s%s%s%s%s%s%s%s\n' $raw_id)
-    set -- $wifi_id_raw
-    while [ -n "$1" ]; do
-        wlan_id=$(echo $1 | awk -F":" '{print $4}')
-        mac_id=$(echo $1 | sed 's/.*BSS-TM-RESP\(.*\)$/\1/g' | sed -r 's/status_code.+//')
-        logger -t bsskick Kick client with mac: $mac_id from Wi-Fi $wlan_id
-        ubus call hostapd.$wlan_id del_client "{'addr':'$mac_id', 'reason':5, 'deauth':false, 'ban_time':0}"
-        shift
-    done
-sleep $time_id
+logread -f -e hostapd | awk '/bss_termination_delay/{ system("kill $(pgrep logread)") }'
+raw_id="$(logread -l 1 -e hostapd)"
+wlan_id_current=$(echo $raw_id | awk -F": " '{print $2}')
+mac_id_current=$(echo $raw_id | awk -F" " '{print $10}')
+kick_id="1"
+     set -- $mac_id
+     while [ -n "$1" ]; do
+        if [ "$1" == "$mac_id_current" ]
+        then
+            kick_id="0"
+        fi
+     shift
+     done
+if [ $kick_id == "1" ]
+then
+    logger -t bsskick kick client with mac: $mac_id_current from wi-fi
+    ubus call hostapd.$wlan_id_current del_client "{'addr':'$mac_id_current', 'reason':5, 'deauth':false, 'ban_time':0}"
+fi
 done
 exit 0
