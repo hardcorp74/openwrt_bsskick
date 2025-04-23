@@ -1,5 +1,5 @@
 {
-  "admin/wireless/bsskick": {
+  "admin/network/bsskick": {
     "title": "Wireless Kick",
     "order": 85,
     "action": {
