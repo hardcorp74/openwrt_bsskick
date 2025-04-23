@@ -1,22 +1,55 @@
 #!/bin/sh /etc/rc.common
-
 START=99
 
-USE_PROCD=1
 NAME=bsskick
 PROG=/usr/bin/bsskick
 CONFIGURATION=bsskick
+PID_FILE=/var/run/${NAME}.pid
 
-start_service() {
-        config_load "${CONFIGURATION}"
-        local mac
-        config_get mac main mac
-        procd_open_instance
-        procd_set_param command "$PROG" "$mac"
-        procd_set_param file /etc/config/bsskick
-        procd_close_instance
+start() {
+    config_load "${CONFIGURATION}"
+    local mac
+    config_get mac main mac
+
+    if [ -z "$mac" ]; then
+        logger -t "$NAME" "Service started for all MAC"
+    fi
+
+    start-stop-daemon -S -q -b -m -p "$PID_FILE" -x "$PROG" -- "${mac:-}"
+
+    if [ $? -eq 0 ]; then
+        logger -t "$NAME" "Service started with MAC: ${mac:-none}"
+    else
+        logger -t "$NAME" "Failed to start service"
+        return 1
+    fi
 }
 
-reload_service() {
-        procd_send_signal $PROG
+stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        logger -t "$NAME" "Service is not running"
+        return 0
+    fi
+
+    start-stop-daemon -K -q -p "$PID_FILE"
+
+    if [ $? -eq 0 ]; then
+        logger -t "$NAME" "Service stopped"
+        rm -f "$PID_FILE"
+    else
+        logger -t "$NAME" "Failed to stop service"
+        return 1
+    fi
+}
+
+reload() {
+    stop
+    sleep 1
+    start
+}
+
+restart() {
+    stop
+    sleep 1
+    start
 }

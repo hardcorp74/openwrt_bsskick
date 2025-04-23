@@ -1,29 +1,54 @@
 #!/bin/ash
-if [ "$1" == "-h" ] || [ "$1" == "--h" ] || [ "$1" == "-help" ] || [ "$1" == "--help" ] || [ "$1" == "/?" ]
-    then
-        echo "Usage: $0 [mac list] or simple press Enter"
-        exit 0
-fi
-mac_id=$(echo "$1" | awk '{print tolower($0)}')
-while true
-do
-logread -f -e hostapd | awk '/bss_termination_delay/{ system("kill $(pgrep logread)") }'
-raw_id="$(logread -l 1 -e hostapd)"
-wlan_id_current=$(echo $raw_id | awk -F": " '{print $2}')
-mac_id_current=$(echo $raw_id | awk -F" " '{print $10}')
-kick_id="1"
-     set -- $mac_id
-     while [ -n "$1" ]; do
-        if [ "$1" == "$mac_id_current" ]
-        then
-            kick_id="0"
-        fi
-     shift
-     done
-if [ $kick_id == "1" ]
-then
-    logger -t bsskick kick client with mac: $mac_id_current from wi-fi
-    ubus call hostapd.$wlan_id_current del_client "{'addr':'$mac_id_current', 'reason':5, 'deauth':false, 'ban_time':0}"
-fi
+
+# Help section
+[ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "/?" ] && {
+    echo "Usage: $0 [mac1 mac2 ...]  or simple press Enter"
+    exit 0
+}
+
+# MAC to lower case
+macs_to_allow=""
+for arg in "$@"; do
+    macs_to_allow="$macs_to_allow $(echo "$arg" | awk '{print tolower($0)}')"
 done
-exit 0
+
+# Make FIFO
+FIFO="/tmp/bsskick.fifo"
+rm -f "$FIFO" 2>/dev/null
+mkfifo "$FIFO" || exit 1
+
+# Start logread to FIFO
+logread -f > "$FIFO" &
+LOGREAD_PID=$!
+
+# Cleanup FIFO on exit
+cleanup() { kill $LOGREAD_PID; rm -f "$FIFO"; }
+trap cleanup EXIT
+
+# Main
+while read -r line; do
+    # Wait "bss_termination_delay"
+    if ! echo "$line" | grep -q "bss_termination_delay"; then
+        continue
+    fi
+
+    # Parse MAC address
+    wlan_id=$(echo "$line" | awk -F": " '{print $2}')
+    current_mac=$(echo "$line" | awk '{print $10}')
+    [ -z "$current_mac" ] && continue
+
+    # Check to kick
+    kick=1
+    for allowed_mac in $macs_to_allow; do
+        if [ "$current_mac" = "$allowed_mac" ]; then
+            kick=0
+            break
+        fi
+    done
+
+    # Kick
+    if [ "$kick" -eq 1 ]; then
+        logger -t bsskick "Kicking $current_mac (not in allow list)"
+        ubus call "hostapd.$wlan_id" del_client "{'addr':'$current_mac', 'reason':5, 'deauth':false, 'ban_time':0}" >/dev/null 2>&1
+    fi
+done < "$FIFO"

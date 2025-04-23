@@ -1,6 +1,6 @@
 {
-  "admin/network/bsskick": {
-    "title": "Bsskick",
+  "admin/wireless/bsskick": {
+    "title": "Wireless Kick",
     "order": 85,
     "action": {
       "type": "view",
